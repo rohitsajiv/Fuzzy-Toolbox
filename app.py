@@ -8,6 +8,14 @@ from toolbox import (
     DEFUZZ, fire_rule, aggregate
 )
 
+# Additional fuzzy relation operations
+def relation_union(R, S): return np.maximum(R, S)
+def relation_intersection(R, S): return np.minimum(R, S)
+def max_min_composition(R, S):
+    return np.array([[np.max(np.minimum(R[i, :], S[:, j])) for j in range(S.shape[1])] for i in range(R.shape[0])])
+def max_product_composition(R, S):
+    return np.array([[np.max(R[i, :] * S[:, j]) for j in range(S.shape[1])] for i in range(R.shape[0])])
+
 st.set_page_config(page_title="Fuzzy Toolbox • Tabs", layout="wide", page_icon="🧩")
 
 # ---- session ----
@@ -17,13 +25,20 @@ if "sets" not in st.session_state: st.session_state.sets = {}
 if "rules" not in st.session_state: st.session_state.rules = []
 if "last_outputs" not in st.session_state: st.session_state.last_outputs = {}
 
-PAGES = ["🏗 Universes", "🌈 Fuzzy Sets", "⚖ Rules", "🧠 Inference", "📊 Results"]
+PAGES = [
+    "🏗 Universes",
+    "🌈 Fuzzy Sets",
+    "🧮 Fuzzy Set Ops",
+    "🔗 Fuzzy Relations",
+    "⚖ Rules",
+    "🧠 Inference",
+    "📊 Results"
+]
 
 # ---------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------
 def rerun_safe():
-    """Safe rerun compatible with Streamlit ≥1.31"""
     try:
         st.rerun()
     except Exception:
@@ -41,10 +56,8 @@ def plot_universe(u, extra=None, title=""):
     if extra:
         for label, mu in extra:
             fig.add_trace(go.Scatter(x=U, y=mu, mode="lines", name=label, line=dict(width=3, dash="dash")))
-    fig.update_layout(
-        template="plotly_dark", title=f"{u} {title}".strip(),
-        xaxis_title="Universe", yaxis_title="Membership", height=360
-    )
+    fig.update_layout(template="plotly_dark", title=f"{u} {title}".strip(),
+                      xaxis_title="Universe", yaxis_title="Membership", height=360)
     st.plotly_chart(fig, use_container_width=True)
 
 def df_values(u, label, mu):
@@ -61,8 +74,7 @@ st.write("---")
 # =========================================================
 if st.session_state.page == 0:
     st.subheader("Define Universes")
-
-    c1, c2 = st.columns([2, 3])
+    c1, c2 = st.columns([2,3])
     with c1:
         u_name = st.text_input("Universe name")
         u_vals = st.text_input("Values (space-separated, e.g. 0 10 20 ... 100)")
@@ -87,24 +99,8 @@ if st.session_state.page == 0:
         if not st.session_state.universes:
             st.info("None yet.")
         for u, U in list(st.session_state.universes.items()):
-            b1, b2, b3 = st.columns([5, 1, 1])
+            b1, b2, b3 = st.columns([5,1,1])
             b1.write(f"**{u}**: {U}")
-            if b2.button("Edit", key=f"edit_u_{u}"):
-                new = st.text_input(f"Edit values for {u}", value=" ".join(map(str, U)), key=f"in_u_{u}")
-                if st.button("Save", key=f"save_u_{u}"):
-                    try:
-                        newU = list(map(float, new.split()))
-                        st.session_state.universes[u] = newU
-                        # recompute sets on this universe
-                        for s, d in st.session_state.sets.get(u, {}).items():
-                            if d["type"] == "Manual":
-                                if len(d["mu"]) != len(newU):
-                                    d["mu"] = np.clip(np.interp(newU, U, d["mu"]), 0, 1)
-                            else:
-                                d["mu"] = build_membership(newU, d["type"], d["params"], None)
-                        rerun_safe()
-                    except Exception:
-                        st.error("Invalid numbers")
             if b3.button("Delete", key=f"del_u_{u}"):
                 st.session_state.universes.pop(u, None)
                 st.session_state.sets.pop(u, None)
@@ -120,16 +116,13 @@ if st.session_state.page == 0:
 elif st.session_state.page == 1:
     if not st.session_state.universes:
         st.warning("Add a universe first.")
-        if st.button("← Back"):
-            st.session_state.page = 0
-            rerun_safe()
     else:
         st.subheader("Create / Edit Fuzzy Sets")
         u_sel = st.selectbox("Universe", list(st.session_state.universes.keys()))
         ensure_sets_universe(u_sel)
         U = st.session_state.universes[u_sel]
 
-        c1, c2 = st.columns([2, 2])
+        c1, c2 = st.columns([2,2])
         with c1:
             s_name = st.text_input("Set name")
             mtype = st.selectbox("Membership type", ["Triangular", "Trapezoidal", "Gaussian", "Manual"])
@@ -178,21 +171,107 @@ elif st.session_state.page == 1:
             if not st.session_state.sets[u_sel]:
                 st.info("None.")
             for s, d in list(st.session_state.sets[u_sel].items()):
-                b1, b2, b3 = st.columns([5, 1, 1])
+                b1, b2, b3 = st.columns([5,1,1])
                 b1.write(f"**{s}** · {d['type']} · params={d['params']}")
-                if b2.button("Edit", key=f"edit_s_{u_sel}_{s}"):
-                    plot_universe(u_sel, extra=[(f"editing:{s}", d["mu"])], title="(editing)")
-                    df_values(u_sel, f"µ({s})", d["mu"])
                 if b3.button("Delete", key=f"del_s_{u_sel}_{s}"):
                     st.session_state.sets[u_sel].pop(s, None)
                     rerun_safe()
 
-        if st.button("Next → Rules"):
+        if st.button("Next → Fuzzy Set Ops"):
             st.session_state.page = 2
             rerun_safe()
 
 # =========================================================
-# 3) RULES
+# 3) FUZZY SET OPERATIONS
+# =========================================================
+elif st.session_state.page == 2:
+    st.subheader("Fuzzy Set Operations")
+    if not st.session_state.sets:
+        st.warning("Add fuzzy sets first.")
+    else:
+        u_sel = st.selectbox("Select Universe", list(st.session_state.sets.keys()))
+        sets_here = list(st.session_state.sets[u_sel].keys())
+        if not sets_here:
+            st.info("No sets in this universe.")
+        else:
+            op = st.selectbox("Operation", [
+                "Equality","Complement","Intersection","Union",
+                "Algebraic Product","Multiply by Crisp","Power",
+                "Algebraic Sum","Algebraic Difference","Bounded Sum","Bounded Difference"
+            ])
+            s1 = st.selectbox("Set 1", sets_here)
+            crisp = None; s2 = None
+            if op not in ["Complement","Multiply by Crisp","Power","Equality"]:
+                s2 = st.selectbox("Set 2", [k for k in sets_here if k != s1] or sets_here)
+            if op in ["Multiply by Crisp","Power"]:
+                crisp = st.number_input("Crisp value", value=1.0)
+
+            if st.button("Compute"):
+                U = np.array(st.session_state.universes[u_sel])
+                mu1 = st.session_state.sets[u_sel][s1]["mu"]
+                result_name, muR = "result", None
+                if op == "Equality":
+                    s2n = st.selectbox("Compare with", sets_here, key="eq")
+                    mu2 = st.session_state.sets[u_sel][s2n]["mu"]
+                    st.success(f"Equal? {equal(mu1, mu2)}")
+                    df_values(u_sel, f"µ({s1})", mu1)
+                    df_values(u_sel, f"µ({s2n})", mu2)
+                else:
+                    if op == "Complement": muR = complement(mu1)
+                    elif op == "Intersection": mu2 = st.session_state.sets[u_sel][s2]["mu"]; muR = intersection(mu1, mu2)
+                    elif op == "Union": mu2 = st.session_state.sets[u_sel][s2]["mu"]; muR = union(mu1, mu2)
+                    elif op == "Algebraic Product": mu2 = st.session_state.sets[u_sel][s2]["mu"]; muR = alg_prod(mu1, mu2)
+                    elif op == "Multiply by Crisp": muR = crisp_mul(mu1, crisp)
+                    elif op == "Power": muR = power(mu1, crisp)
+                    elif op == "Algebraic Sum": mu2 = st.session_state.sets[u_sel][s2]["mu"]; muR = alg_sum(mu1, mu2)
+                    elif op == "Algebraic Difference": mu2 = st.session_state.sets[u_sel][s2]["mu"]; muR = alg_diff(mu1, mu2)
+                    elif op == "Bounded Sum": mu2 = st.session_state.sets[u_sel][s2]["mu"]; muR = bsum(mu1, mu2)
+                    elif op == "Bounded Difference": mu2 = st.session_state.sets[u_sel][s2]["mu"]; muR = bdiff(mu1, mu2)
+                    if muR is not None:
+                        df_values(u_sel, f"{op}", muR)
+                        plot_universe(u_sel, extra=[(op, muR)], title=f"({op})")
+
+        if st.button("Next → Fuzzy Relations"):
+            st.session_state.page = 3
+            rerun_safe()
+
+# =========================================================
+# 4) FUZZY RELATION OPERATIONS
+# =========================================================
+elif st.session_state.page == 3:
+    st.subheader("Fuzzy Relation Operations")
+
+    op = st.selectbox("Operation", [
+        "Union (R ∪ S)",
+        "Intersection (R ∩ S)",
+        "Max–Min Composition",
+        "Max–Product Composition"
+    ])
+    rows = st.number_input("Rows", min_value=1, value=2, step=1)
+    cols = st.number_input("Columns", min_value=1, value=2, step=1)
+
+    R_vals = st.text_area("Enter matrix R (space-separated, row-wise)", "0.2 0.5 0.7 0.9")
+    S_vals = st.text_area("Enter matrix S (space-separated, row-wise)", "0.4 0.6 0.8 1.0")
+
+    if st.button("Compute"):
+        try:
+            R = np.array(list(map(float, R_vals.split()))).reshape(int(rows), int(cols))
+            S = np.array(list(map(float, S_vals.split()))).reshape(int(rows), int(cols))
+            if op.startswith("Union"): result = relation_union(R, S)
+            elif op.startswith("Intersection"): result = relation_intersection(R, S)
+            elif op.startswith("Max–Min"): result = max_min_composition(R, S)
+            else: result = max_product_composition(R, S)
+            st.success(f"Result of {op}:")
+            st.dataframe(np.round(result, 3))
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+    if st.button("Next → Rules"):
+        st.session_state.page = 4
+        rerun_safe()
+
+# =========================================================
+# 5) RULES
 # =========================================================
 elif st.session_state.page == 2:
     st.subheader("Rule Base")
@@ -243,7 +322,7 @@ elif st.session_state.page == 2:
             rerun_safe()
 
 # =========================================================
-# 4) INFERENCE
+# 6) INFERENCE
 # =========================================================
 elif st.session_state.page == 3:
     st.subheader("Inference")
@@ -290,7 +369,7 @@ elif st.session_state.page == 3:
             rerun_safe()
 
 # =========================================================
-# 5) RESULTS
+# 7) RESULTS
 # =========================================================
 else:
     st.subheader("Results & Defuzzification")
