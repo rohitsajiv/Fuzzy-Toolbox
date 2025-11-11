@@ -1,10 +1,5 @@
-# =========================================================
-# app_streamlit_tabs.py — Final Fixed Version
-# =========================================================
-
 import streamlit as st
 import numpy as np
-import json, io
 import plotly.graph_objects as go
 from toolbox import (
     build_membership, equal, complement, union, intersection,
@@ -21,11 +16,11 @@ def max_product_composition(R, S):
     return np.array([[np.max(R[i, :] * S[:, j]) for j in range(S.shape[1])] for i in range(R.shape[0])])
 
 # =========================================================
-# Streamlit Configuration
+# Streamlit Setup
 # =========================================================
 st.set_page_config(page_title="🧩 Fuzzy Logic Toolbox", layout="wide", page_icon="🧩")
 
-# --- Initialize Session State ---
+# --- Session State ---
 if "page" not in st.session_state: st.session_state.page = 0
 if "universes" not in st.session_state: st.session_state.universes = {}
 if "sets" not in st.session_state: st.session_state.sets = {}
@@ -46,8 +41,11 @@ PAGES = [
 # Utility Functions
 # =========================================================
 def rerun_safe():
-    try: st.rerun()
-    except Exception: st.experimental_rerun()
+    """Safe rerun (Streamlit ≥1.32 compatible)."""
+    try:
+        st.rerun()
+    except Exception:
+        pass
 
 def ensure_sets_universe(u):
     if u not in st.session_state.sets:
@@ -61,17 +59,15 @@ def plot_universe(u, extra=None, title=""):
     if extra:
         for label, mu in extra:
             fig.add_trace(go.Scatter(x=U, y=mu, mode="lines", name=label, line=dict(width=3, dash="dash")))
-    fig.update_layout(
-        template="plotly_dark", title=f"{u} {title}".strip(),
-        xaxis_title="Universe", yaxis_title="Membership", height=360
-    )
+    fig.update_layout(template="plotly_dark", title=f"{u} {title}".strip(),
+                      xaxis_title="Universe", yaxis_title="Membership", height=360)
     st.plotly_chart(fig, use_container_width=True)
 
 def df_values(u, label, mu):
     st.dataframe({"U": st.session_state.universes[u], label: np.round(mu, 4)}, use_container_width=True)
 
 # =========================================================
-# Navigation Header
+# Navigation
 # =========================================================
 st.markdown("<h1 style='margin:0'>🧩 Fuzzy Logic Toolbox</h1>", unsafe_allow_html=True)
 sel = st.radio("Navigate", PAGES, index=st.session_state.page, horizontal=True, label_visibility="collapsed")
@@ -188,10 +184,10 @@ elif st.session_state.page == 1:
                     st.session_state.sets[u_sel].pop(s, None)
                     rerun_safe()
 
-        st.write("---")
-        if st.button("Next → Fuzzy Set Operations"):
-            st.session_state.page = 2
-            rerun_safe()
+    st.write("---")
+    if st.button("Next → Fuzzy Set Operations"):
+        st.session_state.page = 2
+        rerun_safe()
 
 # =========================================================
 # 2) FUZZY SET OPERATIONS
@@ -212,6 +208,8 @@ elif st.session_state.page == 2:
         crisp = None; s2 = None
         if op not in ["Complement","Multiply by Crisp","Power","Equality"]:
             s2 = st.selectbox("Set 2", [k for k in sets_here if k != s1] or sets_here)
+        if op == "Equality":
+            s2 = st.selectbox("Set 2", [k for k in sets_here if k != s1] or sets_here, key="eq")
         if op in ["Multiply by Crisp","Power"]:
             crisp = st.number_input("Crisp value", value=1.0)
 
@@ -220,9 +218,10 @@ elif st.session_state.page == 2:
             mu1 = st.session_state.sets[u_sel][s1]["mu"]
             muR = None
             if op == "Equality":
-                s2n = st.selectbox("Compare with", sets_here, key="eq")
-                mu2 = st.session_state.sets[u_sel][s2n]["mu"]
-                st.success(f"Equal? {equal(mu1, mu2)}")
+                mu2 = st.session_state.sets[u_sel][s2]["mu"]
+                result = equal(mu1, mu2)
+                st.success(f"Are '{s1}' and '{s2}' equal? → {result}")
+                plot_universe(u_sel, extra=[(s1, mu1), (s2, mu2)], title="Equality Check")
             else:
                 if op == "Complement": muR = complement(mu1)
                 elif op == "Intersection": mu2 = st.session_state.sets[u_sel][s2]["mu"]; muR = intersection(mu1, mu2)
@@ -242,20 +241,20 @@ elif st.session_state.page == 2:
     if st.button("Next → Fuzzy Relations"):
         st.session_state.page = 3
         rerun_safe()
-
 # =========================================================
 # 3) FUZZY RELATION OPERATIONS
 # =========================================================
 elif st.session_state.page == 3:
-    st.subheader("Fuzzy Relation Operations")
+    st.subheader("🔗 Fuzzy Relation Operations")
+
     op = st.selectbox("Operation", [
         "Union (R ∪ S)",
         "Intersection (R ∩ S)",
         "Max–Min Composition",
         "Max–Product Composition"
     ])
-    rows = st.number_input("Rows", min_value=1, value=2, step=1)
-    cols = st.number_input("Columns", min_value=1, value=2, step=1)
+    rows = st.number_input("Rows (for R)", min_value=1, value=2, step=1)
+    cols = st.number_input("Columns (for R)", min_value=1, value=2, step=1)
 
     R_vals = st.text_area("Enter matrix R (space-separated, row-wise)", "0.2 0.5 0.7 0.9")
     S_vals = st.text_area("Enter matrix S (space-separated, row-wise)", "0.4 0.6 0.8 1.0")
@@ -268,104 +267,176 @@ elif st.session_state.page == 3:
             elif op.startswith("Intersection"): result = relation_intersection(R, S)
             elif op.startswith("Max–Min"): result = max_min_composition(R, S)
             else: result = max_product_composition(R, S)
-            st.success(f"Result of {op}:")
+            st.success(f"✅ Result of {op}:")
             st.dataframe(np.round(result, 3))
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"⚠️ Error: {e}")
 
     st.write("---")
-    if st.button("Next → Rules"):
+    if st.button("Next → Rule Base"):
         st.session_state.page = 4
         rerun_safe()
 
+
 # =========================================================
-# 4) RULES
+# 4) RULES (Persistent & Stable)
 # =========================================================
 elif st.session_state.page == 4:
     st.subheader("Rule Base")
+
     all_unis = list(st.session_state.universes.keys())
+
     if not all_unis:
         st.warning("Add universes and sets first.")
-    else:
-        if st.button("Add Rule"):
-            st.session_state.rules.append({
-                "antecedents": [], "op": "AND", "consequent": None, "implication": "Mamdani"
-            })
+        if st.button("← Back"):
+            st.session_state.page = 3
             rerun_safe()
+    else:
+        st.markdown("### Define fuzzy rules")
 
+        # Add a new rule
+        if st.button("➕ Add Rule"):
+            st.session_state.rules.append({
+                "antecedents": [],
+                "op": "AND",
+                "consequent": None,
+                "implication": "Mamdani"
+            })
+            st.toast("Rule added ✅")
+
+        if not st.session_state.rules:
+            st.info("No rules yet. Click 'Add Rule' to begin.")
+
+        # Show existing rules
         for i, rule in enumerate(st.session_state.rules):
             st.markdown(f"**Rule {i+1}**")
             c1, c2, c3 = st.columns([1, 1, 1])
-            if c1.button("Add antecedent", key=f"addant_{i}"):
-                for u in all_unis:
-                    if st.session_state.sets.get(u):
-                        rule["antecedents"].append((u, next(iter(st.session_state.sets[u].keys()))))
-                        rerun_safe()
-                        break
-            rule["op"] = c2.selectbox("Operator", ["AND", "OR"], index=["AND", "OR"].index(rule["op"]), key=f"op_{i}")
-            if c3.button("Delete rule", key=f"delrule_{i}"):
-                st.session_state.rules.pop(i)
-                rerun_safe()
 
+            # Operator
+            rule["op"] = c2.selectbox(
+                "Operator",
+                ["AND", "OR"],
+                index=["AND", "OR"].index(rule.get("op", "AND")),
+                key=f"op_{i}"
+            )
+
+            # Delete rule
+            if c3.button("🗑 Delete", key=f"delrule_{i}"):
+                st.session_state.rules.pop(i)
+                st.toast(f"Deleted rule {i+1}")
+                st.experimental_set_query_params()  # minimal refresh without rerun
+                st.stop()
+
+            # Manage antecedents
+            st.write("**Antecedents:**")
             for j, (u, s) in enumerate(rule["antecedents"]):
                 a1, a2, a3 = st.columns([1.2, 1.2, 0.4])
-                nu = a1.selectbox("Universe", all_unis, index=all_unis.index(u), key=f"ru_{i}_{j}")
+                nu = a1.selectbox(
+                    f"Universe {j+1}",
+                    all_unis,
+                    index=all_unis.index(u),
+                    key=f"ru_{i}_{j}"
+                )
                 sets_here = list(st.session_state.sets.get(nu, {}).keys())
-                ns = a2.selectbox("Set", sets_here, index=sets_here.index(s) if s in sets_here else 0, key=f"rs_{i}_{j}")
+                ns = a2.selectbox(
+                    f"Set {j+1}",
+                    sets_here,
+                    index=sets_here.index(s) if s in sets_here else 0,
+                    key=f"rs_{i}_{j}"
+                )
                 if a3.button("✖", key=f"rmant_{i}_{j}"):
                     rule["antecedents"].pop(j)
-                    rerun_safe()
+                    st.toast("Antecedent removed ❌")
+                    st.stop()
                 rule["antecedents"][j] = (nu, ns)
 
+            if st.button("➕ Add antecedent", key=f"addant_{i}"):
+                # Add first available fuzzy set automatically
+                for u in all_unis:
+                    if st.session_state.sets.get(u):
+                        first_set = next(iter(st.session_state.sets[u].keys()))
+                        rule["antecedents"].append((u, first_set))
+                        st.toast("Antecedent added ✅")
+                        break
+
+            # Consequent and implication
             b1, b2, b3 = st.columns([1.2, 1.2, 1])
-            rule["implication"] = b1.selectbox("Implication", ["Mamdani", "Larsen", "Zadeh"], key=f"imp_{i}")
+            rule["implication"] = b1.selectbox(
+                "Implication",
+                ["Mamdani", "Larsen", "Zadeh"],
+                key=f"imp_{i}",
+                index=["Mamdani", "Larsen", "Zadeh"].index(rule.get("implication", "Mamdani"))
+            )
             cu = b2.selectbox("Consequent universe", all_unis, key=f"cu_{i}")
             csets = list(st.session_state.sets.get(cu, {}).keys())
-            cs = b3.selectbox("Consequent set", csets, key=f"cs_{i}")
-            rule["consequent"] = (cu, cs)
+            if not csets:
+                st.warning(f"No sets defined for universe '{cu}' yet.")
+            else:
+                cs = b3.selectbox("Consequent set", csets, key=f"cs_{i}")
+                rule["consequent"] = (cu, cs)
 
-    st.write("---")
-    if st.button("Next → Inference"):
-        st.session_state.page = 5
-        rerun_safe()
+            st.write("---")
+
+        # Debug view (optional)
+        with st.expander("🔍 View current rule structure"):
+            st.json(st.session_state.rules)
+
+        st.write("")
+        c = st.columns(2)
+        if c[0].button("← Back"):
+            st.session_state.page = 3
+            rerun_safe()
+        if c[1].button("Next → Inference"):
+            st.session_state.page = 5
+            rerun_safe()
+
+
 
 # =========================================================
 # 5) INFERENCE
 # =========================================================
 elif st.session_state.page == 5:
-    st.subheader("Inference")
+    st.subheader("🧠 Inference (Rule Firing)")
+
     if not st.session_state.rules:
-        st.info("Add at least one rule first.")
+        st.info("Define at least one rule before running inference.")
     else:
         crisp = {}
+        st.markdown("### Enter Crisp Input Values")
         for u, U in st.session_state.universes.items():
             step = float(U[1] - U[0]) if len(U) > 1 else 1.0
-            crisp[u] = st.slider(f"Crisp input for {u}", float(min(U)), float(max(U)), float(U[len(U)//2]), step=step)
+            crisp[u] = st.slider(f"{u}", float(min(U)), float(max(U)), float(U[len(U)//2]), step=step)
 
         outputs, alphas, labels = [], [], []
+
         for idx, rule in enumerate(st.session_state.rules):
             if not rule["antecedents"] or not rule["consequent"] or not rule["consequent"][1]:
                 continue
+
             cu, Uc, mu_out, a = fire_rule(rule, crisp, st.session_state.universes, st.session_state.sets)
             outputs.append((cu, Uc, mu_out))
             alphas.append(a)
             labels.append(f"R{idx+1}-{rule['implication']}->{rule['consequent'][1]}")
-            st.caption(f"Rule output on **{cu}** (α={a:.3f})")
+
+            with st.expander(f"Rule {idx+1} Output (α={a:.3f})"):
+                st.dataframe({"U": Uc, "μ_rule": np.round(mu_out, 4)}, use_container_width=True)
 
         if outputs:
             agg = aggregate(outputs)
             st.session_state.last_outputs = agg
 
+            st.markdown("### Rule Activation Strengths (α)")
             fig = go.Figure(go.Bar(x=labels, y=alphas))
-            fig.update_layout(template="plotly_dark", height=260, title="Firing strengths (α)")
+            fig.update_layout(template="plotly_dark", height=260, title="Firing Strengths")
             st.plotly_chart(fig, use_container_width=True)
 
+            st.markdown("### Aggregated Output Sets")
             for u, (U, mu) in agg.items():
                 fig = go.Figure()
                 for s, d in st.session_state.sets.get(u, {}).items():
                     fig.add_trace(go.Scatter(x=U, y=d["mu"], mode="lines", name=s, opacity=0.35))
                 fig.add_trace(go.Scatter(x=U, y=mu, mode="lines", name="Aggregated", line=dict(width=3)))
-                fig.update_layout(template="plotly_dark", height=360, title=f"Aggregated on {u}")
+                fig.update_layout(template="plotly_dark", height=360, title=f"Aggregated Output on {u}")
                 st.plotly_chart(fig, use_container_width=True)
 
     st.write("---")
@@ -373,27 +444,35 @@ elif st.session_state.page == 5:
         st.session_state.page = 6
         rerun_safe()
 
+
 # =========================================================
-# 6) RESULTS
+# 6) RESULTS (Defuzzification)
 # =========================================================
 elif st.session_state.page == 6:
-    st.subheader("Results & Defuzzification")
+    st.subheader("📊 Defuzzification and Results")
+
     if not st.session_state.last_outputs:
-        st.info("Run inference first.")
+        st.info("Run inference first to get aggregated outputs.")
     else:
         for u, (U, mu) in st.session_state.last_outputs.items():
-            st.markdown(f"### Output universe: **{u}**")
-            method = st.selectbox(f"Defuzzification method ({u})", list(DEFUZZ.keys()), key=f"def_{u}")
+            st.markdown(f"### Output Universe: **{u}**")
+
+            method = st.selectbox(f"Defuzzification Method for {u}", list(DEFUZZ.keys()), key=f"def_{u}")
             val = DEFUZZ[method](np.array(U, float), np.array(mu, float))
 
             fig = go.Figure(go.Scatter(x=U, y=mu, mode="lines", name="Aggregated", line=dict(width=3)))
             if val == val:
-                fig.add_vline(x=val, line=dict(color="red", dash="dash"), annotation_text=f"{method}: {val:.3f}")
+                fig.add_vline(x=val, line=dict(color="red", dash="dash"),
+                              annotation_text=f"{method}: {val:.3f}")
             fig.update_layout(template="plotly_dark", height=360)
             st.plotly_chart(fig, use_container_width=True)
 
             st.dataframe({"U": U, "μ_aggregated": np.round(mu, 4)}, use_container_width=True)
             if val == val:
-                st.success(f"Defuzzified value = {val:.3f}")
+                st.success(f"✅ Defuzzified Value = {val:.3f}")
             else:
-                st.warning("Cannot defuzzify (zero area).")
+                st.warning("⚠️ Cannot defuzzify (zero area).")
+
+    if st.button("← Back to Inference"):
+        st.session_state.page = 5
+        rerun_safe()
